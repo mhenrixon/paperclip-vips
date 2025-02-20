@@ -11,3 +11,5 @@
 .rspec_status
 .byebug_history
 *.gem
+mise.toml
+Gemfile.lock

@@ -27,12 +27,14 @@ module Paperclip
       destination = TempfileFactory.new.generate(filename)
 
       begin
-        thumbnail = ::Vips::Image.thumbnail(source.path, width, { height: crop ? height : nil, crop: crop }) if @target_geometry
+        thumbnail = ::Vips::Image.thumbnail(source.path, width, height: crop ? height : nil, crop: crop) if @target_geometry
         thumbnail = ::Vips::Image.new_from_file(source.path) if !defined?(thumbnail) || thumbnail.nil?
         thumbnail = process_convert_options(thumbnail)
         save_thumbnail(thumbnail, destination.path)
         
       rescue => e
+        p e.message, e.backtrace
+
         if @whiny
           message = "There was an error processing the thumbnail for #{@basename}:\n" + e.message
           raise Paperclip::Error, message
@@ -87,7 +89,7 @@ module Paperclip
           commands = []
         end
 
-        if @auto_orient && commands.exclude?({ cmd: "autorot" })
+        if @auto_orient && commands.none? { _1[:cmd] == "autorot" }
           commands.unshift({ cmd: "autorot" })
         end
 
