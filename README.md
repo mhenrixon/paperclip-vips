@@ -7,7 +7,7 @@ A custom paperclip processor that uses the [libvips image processing library](ht
 Add this line to your application's Gemfile:
 
 ```ruby
-gem 'paperclip-vips'
+gem 'kt-paperclip-vips'
 ```
 
 And then execute:
@@ -16,7 +16,7 @@ And then execute:
 
 Or install it yourself as:
 
-    $ gem install paperclip-vips
+    $ gem install kt-paperclip-vips
 
 Note: You will need to have libvips installed on your machine for this processor to work correctly.
 
