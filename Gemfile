@@ -4,7 +4,11 @@ source "https://rubygems.org"
 gemspec
 
 gem "bundler"
-gem "rake"
-gem "rspec"
 gem "byebug"
 gem "gem-release"
+gem "rake"
+gem "rspec"
+gem "rubocop"
+gem "rubocop-performance"
+gem "rubocop-rake"
+gem "rubocop-rspec"
