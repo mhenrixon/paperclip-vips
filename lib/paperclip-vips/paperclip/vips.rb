@@ -1,13 +1,13 @@
 module Paperclip
   class Vips < Processor
     attr_accessor :auto_orient, :convert_options, :current_geometry, :format, :source_file_options,
-                  :target_geometry, :whiny
+      :target_geometry, :whiny
 
     def initialize(file, options = {}, attachment = nil)
       super
 
       geometry = options[:geometry].to_s
-      @should_crop = geometry[-1,1] == '#'
+      @should_crop = geometry[-1, 1] == "#"
       @target_geometry = options.fetch(:string_geometry_parser, Geometry).parse(geometry)
       @current_geometry = options.fetch(:file_geometry_parser, Geometry).from_file(@file)
       @whiny = options.fetch(:whiny, true)
@@ -27,96 +27,125 @@ module Paperclip
       destination = TempfileFactory.new.generate(filename)
 
       begin
-        thumbnail = ::Vips::Image.thumbnail(source.path, width, height: crop ? height : nil, crop: crop) if @target_geometry
-        thumbnail = ::Vips::Image.new_from_file(source.path) if !defined?(thumbnail) || thumbnail.nil?
-        thumbnail = process_convert_options(thumbnail)
-        save_thumbnail(thumbnail, destination.path)
-        
-      rescue => e
-        p e.message, e.backtrace
+        if @target_geometry.present?
+          target_width = @target_geometry.width
+          target_height = @target_geometry.height
+          modifier = @target_geometry.modifier # e.g., ">", "#", etc.
 
+          # Use thumbnail for efficient resizing and cropping
+          crop = (modifier == "#")
+          thumbnail = ::Vips::Image.thumbnail(
+            source.path,
+            target_width,
+            height: crop ? target_height : nil,
+            size: (modifier == ">" ? :down : :both), # ">" means shrink only
+            crop: crop ? :centre : :none
+          )
+
+          # Additional cropping for exact "#" dimensions if needed
+          if crop && (thumbnail.width != target_width || thumbnail.height != target_height)
+            left = [0, (thumbnail.width - target_width) / 2].max
+            top = [0, (thumbnail.height - target_height) / 2].max
+            crop_width = [target_width, thumbnail.width - left].min
+            crop_height = [target_height, thumbnail.height - top].min
+            if crop_width.positive? && crop_height.positive?
+              thumbnail = thumbnail.crop(left, top, crop_width,
+                crop_height)
+            end
+          end
+        end
+
+        # Fallback to original image if no geometry
+        thumbnail = ::Vips::Image.new_from_file(source.path) unless defined?(thumbnail) && thumbnail
+
+        # Apply convert options
+        thumbnail = process_convert_options(thumbnail)
+
+        # Save the processed image
+        save_thumbnail(thumbnail, destination.path)
+      rescue StandardError => e
+        puts e.message, e.backtrace
         if @whiny
-          message = "There was an error processing the thumbnail for #{@basename}:\n" + e.message
+          message = "There was an error processing the thumbnail for #{@basename}:\n#{e.message}"
           raise Paperclip::Error, message
         end
       end
 
-      return destination
+      destination # Return the Tempfile object
     end
 
     private
-      def crop
-        if @should_crop
-          return @options[:crop] || :centre
-        end
 
-        nil
-      end
+    def crop
+      return @options[:crop] || :centre if @should_crop
 
-      def current_format(file)
-        extension = File.extname(file.path)
-        return extension if extension.present?
+      nil
+    end
 
-        extension = File.extname(file.original_filename)
-        return extension if extension.present?
+    def current_format(file)
+      extension = File.extname(file.path)
+      return extension if extension.present?
 
-        return ""
-      end
+      extension = File.extname(file.original_filename)
+      return extension if extension.present?
 
-      def width
-        @target_geometry&.width || @current_geometry.width
-      end
+      ""
+    end
 
-      def height
-        @target_geometry&.height || @current_geometry.height
-      end
-      
-      def process_convert_options(image)
-        if image
-          commands = parsed_convert_commands(@convert_options)
-          commands.each do |cmd|
-            image = ::Vips::Operation.call(cmd[:cmd], [image, *cmd[:args]], cmd[:optional] || {})
-          end
-        end
+    def width
+      @target_geometry&.width || @current_geometry.width
+    end
 
-        return image
-      end
+    def height
+      @target_geometry&.height || @current_geometry.height
+    end
 
-      def parsed_convert_commands(convert_options)
-        begin
-          commands = JSON.parse(convert_options, symbolize_names: true)
-        rescue
-          commands = []
-        end
+    def process_convert_options(image)
+      if image && @convert_options.present?
+        # Handle string-based convert_options (e.g., "-quality 80 -strip")
+        quality = @convert_options[/quality (\d+)/, 1]&.to_i
+        strip = @convert_options.include?("-strip")
 
-        if @auto_orient && commands.none? { _1[:cmd] == "autorot" }
-          commands.unshift({ cmd: "autorot" })
-        end
+        # Apply options via instance variables for save_thumbnail
+        @processed_quality = quality if quality
+        @processed_strip = strip if strip
 
-        return commands
-      end
-
-      def save_thumbnail(thumbnail, path)
-        case @current_format
-        when ".jpeg", ".jpg"
-          save_jpg(thumbnail, path)
-        when ".gif"
-          save_gif(thumbnail, path)
-        when ".png"
-          save_png(thumbnail, path)
+        # Handle JSON-based commands if present
+        commands = parsed_convert_commands(@convert_options)
+        commands.each do |cmd|
+          image = ::Vips::Operation.call(cmd[:cmd], [image, *cmd[:args]], cmd[:optional] || {})
         end
       end
+      image
+    end
 
-      def save_jpg(thumbnail, path)
-        thumbnail.jpegsave(path)
+    def parsed_convert_commands(convert_options)
+      begin
+        commands = JSON.parse(convert_options, symbolize_names: true)
+      rescue StandardError
+        commands = []
       end
 
-      def save_gif(thumbnail, path)
-        thumbnail.magicksave(path)
-      end
+      commands.unshift({ cmd: "autorot" }) if @auto_orient && commands.none? { |cmd| cmd[:cmd] == "autorot" }
 
-      def save_png(thumbnail, path)
-        thumbnail.pngsave(path)
+      commands
+    end
+
+    def save_thumbnail(thumbnail, path)
+      quality = @processed_quality || 75
+      strip = @processed_strip || false
+
+      case @format.to_s.downcase
+      when ".jpeg", ".jpg", "jpeg", "jpg", "webp"
+        thumbnail.jpegsave(path, Q: quality, strip:)
+      when ".gif", "gif"
+        thumbnail.magicksave(path, strip:) # No quality for GIF
+      when ".png", "png"
+        compression = 9 - (quality / 11.1).floor # Map 0-100 to 9-0
+        thumbnail.pngsave(path, compression:, strip:)
+      else
+        thumbnail.write_to_file(path) # Fallback
       end
+    end
   end
 end
