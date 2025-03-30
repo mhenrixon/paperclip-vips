@@ -1,7 +1,7 @@
 require "ruby-vips"
 require "paperclip"
 require "paperclip-vips/version"
-require "paperclip-vips/paperclip/vips"
+require "paperclip/vips"
 
 module PaperclipVips
   def self.root

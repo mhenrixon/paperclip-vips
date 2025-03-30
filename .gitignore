@@ -13,3 +13,4 @@
 *.gem
 mise.toml
 Gemfile.lock
+.DS_Store
